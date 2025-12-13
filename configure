@@ -1,0 +1,43 @@
+#!/bin/sh
+
+echo "Configuring..."
+
+# Default values
+DEFAULT_PLATFORM="desktop"
+DEFAULT_CC="cc"
+DEFAULT_CFLAGS="-std=gnu99 -pedantic -Wall -Wextra"
+DEFAULT_LDFLAGS="-lm"
+DEFAULT_RAYLIB_PATH="/usr/local/src/raylib"
+
+if [ -z "$PLATFORM" ]; then
+    PLATFORM="$DEFAULT_PLATFORM"
+fi
+if [ -z "$CC" ]; then
+    CC="$DEFAULT_CC"
+fi
+if [ -z "$CFLAGS" ]; then
+    CFLAGS="$DEFAULT_CFLAGS"
+else
+    CFLAGS="$CFLAGS $DEFAULT_CFLAGS"
+fi
+if [ -z "$LDFLAGS" ]; then
+    LDFLAGS="$DEFAULT_LDFLAGS"
+else
+    LDFLAGS="$LDFLAGS $DEFAULT_LDFLAGS"
+fi
+if [ -z "$RAYLIB_PATH" ]; then
+    RAYLIB_PATH="$DEFAULT_RAYLIB_PATH"
+fi
+
+echo "Platform: $PLATFORM"
+echo "Compiler: $($CC --version | head -n1)"
+echo "Raylib path: $RAYLIB_PATH"
+
+# The magic step: substitute placeholders in Makefile.in to create Makefile
+sed -e "s|@CC@|$CC|" \
+    -e "s|@CFLAGS@|$CFLAGS|" \
+    -e "s|@LDFLAGS@|$LDFLAGS|" \
+    -e "s|@RAYLIB_PATH@|$RAYLIB_PATH|" \
+    Makefile.$PLATFORM.in > Makefile
+
+echo "Configuration complete. You can now run 'gmake'."

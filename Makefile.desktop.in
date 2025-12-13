@@ -1,0 +1,47 @@
+RAYLIB_PATH = @RAYLIB_PATH@
+
+CC = @CC@
+LIBS = ${RAYLIB_PATH}/src/libraylib.a
+CFLAGS = @CFLAGS@ -I${RAYLIB_PATH}/src -DPLATFORM_DESKTOP
+LDFLAGS = @LDFLAGS@ -L${RAYLIB_PATH}/src
+SPACER := 3
+
+SRCDIR = src
+BINDIR = bin
+OBJDIR = obj
+RESDIR = res
+
+MAIN = flappy-bird
+SRCS = $(wildcard ${SRCDIR}/*.c)
+GENS = ${SRCDIR}/res.h
+OBJS = $(patsubst ${SRCDIR}/%.c,${OBJDIR}/%.o,${SRCS})
+TXTS = $(wildcard ${RESDIR}/textures/*.png)
+SNDS = $(wildcard ${RESDIR}/sounds/*.wav)
+
+.PHONY: all clean
+
+all: main
+
+main: ${BINDIR}/${MAIN}
+
+clean:
+	@printf "  %-${SPACER}s %s\n" "RM" "${OBJDIR}/*"
+	@rm -rf ${OBJDIR}/*
+	@printf "  %-${SPACER}s %s\n" "RM" "${BINDIR}/${MAIN}"
+	@rm -rf ${BINDIR}/${MAIN}
+
+${BINDIR}/${MAIN}: ${OBJS}
+	@printf "  %-${SPACER}s %s\n" "LD" "$@"
+	@${CC} -o $@ $^ ${LIBS} ${LDFLAGS}
+
+${OBJS}: ${GENS}
+
+${OBJDIR}/%.o: ${SRCDIR}/%.c
+	@printf "  %-${SPACER}s %s\n" "CC" "$<"
+	@${CC} -o $@ -c $< ${CFLAGS}
+
+${SRCDIR}/res.h: ${TXTS} ${SNDS}
+	@printf "/* Generated file, do not include in the source control. */\n\n" >> $@;
+	@for file in $^; do \
+		xxd -i $${file} >> $@; \
+	done
