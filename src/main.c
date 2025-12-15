@@ -4,7 +4,7 @@
 #include <emscripten/emscripten.h>
 #endif
 
-#include "res.h"
+#include "res.h" /* Generated file. */
 
 #define RAYLIB_LOG_LEVEL LOG_ERROR
 
@@ -22,28 +22,39 @@
 
 #define SCREEN_WIDTH  480
 #define SCREEN_HEIGHT 854
+#define SCREEN_ZOOM   1.0f
 
 #define HITBOX_LINE_THICKNESS 2
 
 #define BOUNDARY_TOP    0
 #define BOUNDARY_BOTTOM 100
+#define BOUNDARY_WIDTH  480
+#define BOUNDARY_HEIGHT 854
 
-#define OBSTACLE_WIDTH   80
-#define OBSTACLE_HEIGHT  510
-#define OBSTACLE_PADDING 80
-#define OBSTACLE_MARGIN  180
-#define OBSTACLE_SPEED   170
-#define OBSTACLE_FRAC    5
+#define BACKGROUND_TEXTURE_COUNT 2
+#define BACKGROUND_TEXTURE_SPEED 50
+
+#define BASE_TEXTURE_COUNT 2
+
+#define OBSTACLE_WIDTH    90
+#define OBSTACLE_HEIGHT   480
+#define OBSTACLE_PADDING  120
+#define OBSTACLE_MARGIN   180
+#define OBSTACLE_SPEED    170
+#define OBSTACLE_DISTANCE 240
+#define OBSTACLE_COUNT    2
+#define OBSTACLE_FRAC     5
 
 #define BIRD_HIT_RADIUS     20
-#define BIRD_JUMP_FORCE     510
+#define BIRD_JUMP_FORCE     470
 #define BIRD_ROTATION_SPEED 100
 #define BIRD_ROTATION_MIN   60 /* will be cast to negative */
 #define BIRD_ROTATION_MAX   60
 #define BIRD_INITIAL_SCORE  0
+#define BIRD_COLLISION      1
 
-#define FLASH_INITIAL_ALPHA 0.8
-#define FLASH_DECAY_SPEED   17.0f
+#define FLASH_INITIAL_ALPHA 0.8f
+#define FLASH_DECAY_SPEED   17
 
 #define SIMULATION_GRAVITY 1500
 
@@ -54,15 +65,14 @@ typedef enum {
 } GameMode;
 
 typedef struct {
-    Rectangle hitBoxTop;
-    Rectangle hitBoxBottom;
-    float offset;
-    float distance;
+    Vector2 position;
+    Rectangle pipeTop;
+    Rectangle pipeBottom;
     int passed;
 } Obstacle;
 
 typedef struct {
-    Vector2 hitCircleCenter;
+    Vector2 center;
     float velocity;
     float rotation;
 } Bird;
@@ -93,11 +103,11 @@ typedef struct {
     GameMode mode;
     unsigned int score;
 
-    Rectangle backgrounds[2];
-    Rectangle bases[2];
+    Rectangle backgrounds[BACKGROUND_TEXTURE_COUNT];
+    Rectangle bases[BASE_TEXTURE_COUNT];
     float flashIntensity;
 
-    Obstacle obstacles[2];
+    Obstacle obstacles[OBSTACLE_COUNT];
     Bird bird;
 
     Textures textures;
@@ -184,6 +194,10 @@ void FrameUpdateDraw(void) {
     EndDrawing();
 }
 
+int mod(int a, int n) {
+    return ((a % n) + n) % n;
+}
+
 int IsInputReceived(Sounds* sounds) {
     int val = IsKeyPressed(KEY_SPACE) || IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
     if (val) {
@@ -211,8 +225,8 @@ void BirdDraw(Bird* bird, Textures* textures) {
         *texture,
         (Rectangle){0.0f, 0.0f, texture->width, texture->height},
         (Rectangle){
-            bird->hitCircleCenter.x + adjust.x,
-            bird->hitCircleCenter.y + adjust.y,
+            bird->center.x + adjust.x,
+            bird->center.y + adjust.y,
             (float)BIRD_HIT_RADIUS * 2.0f + adjust.width,
             (float)BIRD_HIT_RADIUS * 2.0f + adjust.height,
         },
@@ -226,13 +240,7 @@ void BirdDraw(Bird* bird, Textures* textures) {
 
 #if DRAW_HITBOX
     DrawRing(
-        bird->hitCircleCenter,
-        (float)(BIRD_HIT_RADIUS - HITBOX_LINE_THICKNESS),
-        (float)BIRD_HIT_RADIUS,
-        0.0f,
-        360.0f,
-        36,
-        RED
+        bird->center, (float)(BIRD_HIT_RADIUS - HITBOX_LINE_THICKNESS), (float)BIRD_HIT_RADIUS, 0.0f, 360.0f, 36, RED
     );
 #endif
 }
@@ -248,25 +256,29 @@ void BirdUpdate(Bird* bird, int jump, float frameTime) {
         }
     }
 
-    bird->hitCircleCenter.y += bird->velocity * frameTime;
+    if (jump || bird->center.y <= BOUNDARY_HEIGHT) {
+        bird->center.y += bird->velocity * frameTime;
+    } else {
+        bird->velocity = 0;
+    }
 }
 
 int BirdIsCollide(Bird* bird, Obstacle* obstacles, int obstacleCount, Sounds* sounds) {
     int isCollide = 0;
-    if (bird->hitCircleCenter.y >= (float)(SCREEN_HEIGHT - (BIRD_HIT_RADIUS + BOUNDARY_BOTTOM))) {
+    if (bird->center.y >= (float)(BOUNDARY_HEIGHT - (BIRD_HIT_RADIUS + BOUNDARY_BOTTOM))) {
         isCollide = 1;
-        bird->hitCircleCenter.y = (float)(SCREEN_HEIGHT - (BIRD_HIT_RADIUS + BOUNDARY_BOTTOM));
+        bird->center.y = (float)(BOUNDARY_HEIGHT - (BIRD_HIT_RADIUS + BOUNDARY_BOTTOM));
     }
-    if (bird->hitCircleCenter.y <= (float)(BIRD_HIT_RADIUS + BOUNDARY_TOP)) {
+    if (bird->center.y <= (float)(BIRD_HIT_RADIUS + BOUNDARY_TOP)) {
         isCollide = 1;
-        bird->hitCircleCenter.y = (float)(BIRD_HIT_RADIUS + BOUNDARY_TOP);
+        bird->center.y = (float)(BIRD_HIT_RADIUS + BOUNDARY_TOP);
     }
     for (int i = 0; isCollide == 0 && i < obstacleCount; i++) {
-        if (CheckCollisionCircleRec(bird->hitCircleCenter, (float)BIRD_HIT_RADIUS, obstacles[i].hitBoxTop)) {
+        if (CheckCollisionCircleRec(bird->center, (float)BIRD_HIT_RADIUS, obstacles[i].pipeTop)) {
             isCollide = 1;
             break;
         }
-        if (CheckCollisionCircleRec(bird->hitCircleCenter, (float)BIRD_HIT_RADIUS, obstacles[i].hitBoxBottom)) {
+        if (CheckCollisionCircleRec(bird->center, (float)BIRD_HIT_RADIUS, obstacles[i].pipeBottom)) {
             isCollide = 1;
             break;
         }
@@ -280,7 +292,11 @@ int BirdIsCollide(Bird* bird, Obstacle* obstacles, int obstacleCount, Sounds* so
 #endif
     }
 
+#if BIRD_COLLISION
     return isCollide;
+#else
+    return 0;
+#endif
 }
 
 unsigned int BirdIsPassed(Bird* bird, Obstacle* obstacles, int obstacleCount, Sounds* sounds) {
@@ -290,7 +306,7 @@ unsigned int BirdIsPassed(Bird* bird, Obstacle* obstacles, int obstacleCount, So
         if (obstacles[i].passed) {
             continue;
         }
-        if (bird->hitCircleCenter.x - (float)BIRD_HIT_RADIUS <= obstacles[i].distance + (float)OBSTACLE_WIDTH) {
+        if (bird->center.x - (float)BIRD_HIT_RADIUS <= obstacles[i].position.x + (float)OBSTACLE_WIDTH) {
             continue;
         }
 
@@ -308,79 +324,86 @@ unsigned int BirdIsPassed(Bird* bird, Obstacle* obstacles, int obstacleCount, So
     return passCount;
 }
 
-void ObstacleDraw(Obstacle* obstacle, Textures* textures) {
-    obstacle->hitBoxTop = (Rectangle){
-        obstacle->distance,
-        (float)BOUNDARY_TOP,
-        (float)OBSTACLE_WIDTH,
-        obstacle->offset,
-    };
-    obstacle->hitBoxBottom = (Rectangle){
-        obstacle->distance,
-        (float)(BOUNDARY_TOP + obstacle->offset + OBSTACLE_MARGIN),
-        (float)OBSTACLE_WIDTH,
-        (float)((SCREEN_HEIGHT - BOUNDARY_BOTTOM) - (obstacle->offset + OBSTACLE_MARGIN)),
-    };
+void ObstacleDraw(Obstacle* obstacles, int obstacleCount, Textures* textures) {
+    for (int i = 0; i < obstacleCount; i++) {
+        obstacles[i].pipeTop = (Rectangle){
+            obstacles[i].position.x,
+            (float)BOUNDARY_TOP,
+            (float)OBSTACLE_WIDTH,
+            obstacles[i].position.y,
+        };
+        obstacles[i].pipeBottom = (Rectangle){
+            obstacles[i].position.x,
+            (float)(BOUNDARY_TOP + obstacles[i].position.y + OBSTACLE_MARGIN),
+            (float)OBSTACLE_WIDTH,
+            (float)((BOUNDARY_HEIGHT - BOUNDARY_BOTTOM) - (obstacles[i].position.y + OBSTACLE_MARGIN)),
+        };
 
 #if DRAW_TEXTURE
-    DrawTexturePro(
-        textures->pipe,
-        (Rectangle){0.0f, 0.0f, -(float)textures->pipe.width, (float)textures->pipe.height},
-        (Rectangle){
-            obstacle->hitBoxTop.x + (float)OBSTACLE_WIDTH,
-            obstacle->hitBoxTop.y + obstacle->offset,
-            obstacle->hitBoxTop.width + 1,
-            (float)OBSTACLE_HEIGHT,
-        },
-        (Vector2){0.0f, 0.0f},
-        180.0f,
-        WHITE
-    );
-    DrawTexturePro(
-        textures->pipe,
-        (Rectangle){
+        DrawTexturePro(
+            textures->pipe,
+            (Rectangle){0.0f, 0.0f, -(float)textures->pipe.width, (float)textures->pipe.height},
+            (Rectangle){
+                obstacles[i].pipeTop.x + (float)OBSTACLE_WIDTH,
+                obstacles[i].pipeTop.y + obstacles[i].position.y,
+                obstacles[i].pipeTop.width + 1,
+                (float)OBSTACLE_HEIGHT,
+            },
+            (Vector2){0.0f, 0.0f},
+            180.0f,
+            WHITE
+        );
+        DrawTexturePro(
+            textures->pipe,
+            (Rectangle){
+                0.0f,
+                0.0f,
+                (float)textures->pipe.width,
+                (float)textures->pipe.height,
+            },
+            (Rectangle){
+                obstacles[i].pipeBottom.x,
+                obstacles[i].pipeBottom.y,
+                obstacles[i].pipeBottom.width + 1,
+                (float)OBSTACLE_HEIGHT,
+            },
+            (Vector2){0.0f, 0.0f},
             0.0f,
-            0.0f,
-            (float)textures->pipe.width,
-            (float)textures->pipe.height,
-        },
-        (Rectangle){
-            obstacle->hitBoxBottom.x,
-            obstacle->hitBoxBottom.y,
-            obstacle->hitBoxBottom.width + 1,
-            (float)OBSTACLE_HEIGHT,
-        },
-        (Vector2){0.0f, 0.0f},
-        0.0f,
-        WHITE
-    );
+            WHITE
+        );
 #else
-    (void)textures;
+        (void)textures;
 #endif
 
 #if DRAW_HITBOX
-    DrawRectangleLinesEx(obstacle->hitBoxTop, (float)HITBOX_LINE_THICKNESS, RED);
-    DrawRectangleLinesEx(obstacle->hitBoxBottom, (float)HITBOX_LINE_THICKNESS, RED);
+        DrawRectangleLinesEx(obstacles[i].pipeTop, (float)HITBOX_LINE_THICKNESS, RED);
+        DrawRectangleLinesEx(obstacles[i].pipeBottom, (float)HITBOX_LINE_THICKNESS, RED);
 #endif
+    }
 }
 
 float GetNextOffset(int step) {
-    float area = (SCREEN_HEIGHT - (BOUNDARY_TOP + BOUNDARY_BOTTOM + OBSTACLE_PADDING + OBSTACLE_MARGIN));
-    return ((area / (float)(OBSTACLE_FRAC + 1)) * (float)step) + (BOUNDARY_TOP + OBSTACLE_PADDING);
+    float area = (BOUNDARY_HEIGHT - (BOUNDARY_TOP + BOUNDARY_BOTTOM + OBSTACLE_MARGIN + (2.0f * OBSTACLE_PADDING)));
+    return ((area / (float)(OBSTACLE_FRAC)) * (float)step) + (BOUNDARY_TOP + OBSTACLE_PADDING);
 }
 
-void ObstacleUpdate(Obstacle* obstacle, float frameTime) {
-    float nextDistance = obstacle->distance - (frameTime * OBSTACLE_SPEED);
-    float nextOffset = obstacle->offset;
+void ObstacleUpdate(Obstacle* obstacles, int obstacleCount, float frameTime) {
+    for (int i = 0; i < obstacleCount; i++) {
+        float decrement = (frameTime * (float)OBSTACLE_SPEED);
+        Vector2 nextPosition = (Vector2){
+            obstacles[i].position.x - decrement,
+            obstacles[i].position.y,
+        };
 
-    if (nextDistance <= -(float)OBSTACLE_WIDTH) {
-        nextDistance = (float)SCREEN_WIDTH;
-        nextOffset = GetNextOffset(GetRandomValue(0, OBSTACLE_FRAC));
-        obstacle->passed = 0;
+        if (nextPosition.x <= -(float)OBSTACLE_WIDTH) {
+            nextPosition.x = obstacles[mod(i - 1, obstacleCount)].position.x + OBSTACLE_WIDTH + OBSTACLE_DISTANCE;
+            nextPosition.x -= decrement;
+            nextPosition.y = GetNextOffset(GetRandomValue(0, OBSTACLE_FRAC));
+            obstacles[i].passed = 0;
+        }
+
+        obstacles[i].position = nextPosition;
     }
-
-    obstacle->distance = nextDistance;
-    obstacle->offset = nextOffset;
 }
 
 void BaseDraw(Rectangle* bases, int baseCount, Textures* textures) {
@@ -398,23 +421,24 @@ void BaseDraw(Rectangle* bases, int baseCount, Textures* textures) {
         (void)bases;
         (void)textures;
 #endif
-    }
 
 #if DRAW_HITBOX
-    DrawLineEx(
-        (Vector2){0.0f, SCREEN_HEIGHT - BOUNDARY_BOTTOM},
-        (Vector2){SCREEN_WIDTH, SCREEN_HEIGHT - BOUNDARY_BOTTOM},
-        (float)HITBOX_LINE_THICKNESS,
-        RED
-    );
+        DrawLineEx(
+            (Vector2){0.0f, BOUNDARY_HEIGHT - BOUNDARY_BOTTOM},
+            (Vector2){BOUNDARY_WIDTH, BOUNDARY_HEIGHT - BOUNDARY_BOTTOM},
+            (float)HITBOX_LINE_THICKNESS,
+            RED
+        );
 #endif
+    }
 }
 
 void BaseUpdate(Rectangle* bases, int baseCount, float frameTime) {
     for (int i = 0; i < baseCount; i++) {
-        float nextX = bases[i].x - (frameTime * (float)OBSTACLE_SPEED);
-        if (nextX <= -(float)SCREEN_WIDTH) {
-            nextX = (float)SCREEN_WIDTH;
+        float decrement = (frameTime * (float)OBSTACLE_SPEED);
+        float nextX = bases[i].x - decrement;
+        if (nextX <= -(float)BOUNDARY_WIDTH) {
+            nextX = bases[mod(i - 1, baseCount)].x + (float)BOUNDARY_WIDTH - decrement;
         }
 
         bases[i].x = nextX;
@@ -441,7 +465,7 @@ void BackgroundDraw(Rectangle* backgrounds, int backgroundCount, Textures* textu
 #if DRAW_HITBOX
     DrawLineEx(
         (Vector2){0.0f, BOUNDARY_TOP + HITBOX_LINE_THICKNESS},
-        (Vector2){SCREEN_WIDTH, BOUNDARY_TOP + HITBOX_LINE_THICKNESS},
+        (Vector2){BOUNDARY_WIDTH, BOUNDARY_TOP + HITBOX_LINE_THICKNESS},
         (float)HITBOX_LINE_THICKNESS,
         RED
     );
@@ -450,9 +474,10 @@ void BackgroundDraw(Rectangle* backgrounds, int backgroundCount, Textures* textu
 
 void BackgroundUpdate(Rectangle* backgrounds, int backgroundCount, float frameTime) {
     for (int i = 0; i < backgroundCount; i++) {
-        float nextX = backgrounds[i].x - (frameTime * ((float)OBSTACLE_SPEED / 4.0f));
-        if (nextX <= -(float)SCREEN_WIDTH) {
-            nextX = (float)SCREEN_WIDTH;
+        float decrement = frameTime * (float)BACKGROUND_TEXTURE_SPEED;
+        float nextX = backgrounds[i].x - decrement;
+        if (nextX <= -(float)BOUNDARY_WIDTH) {
+            nextX = backgrounds[mod(i - 1, backgroundCount)].x + (float)BOUNDARY_WIDTH - decrement;
         }
 
         backgrounds[i].x = nextX;
@@ -461,43 +486,44 @@ void BackgroundUpdate(Rectangle* backgrounds, int backgroundCount, float frameTi
 
 void GameReset(Game* game) {
     game->camera = (Camera2D){0};
-    game->camera.zoom = 1.0f;
-
-    game->backgrounds[0] = (Rectangle){
-        0.0f,
-        0.0f,
-        (float)SCREEN_WIDTH,
-        (float)(SCREEN_HEIGHT - BOUNDARY_BOTTOM),
+    game->camera.zoom = SCREEN_ZOOM;
+    game->camera.offset = (Vector2){
+        (float)SCREEN_WIDTH * (float)SCREEN_ZOOM,
+        (float)SCREEN_HEIGHT * (float)SCREEN_ZOOM,
     };
-    game->backgrounds[1] = (Rectangle){
-        (float)SCREEN_WIDTH,
-        0.0f,
-        (float)SCREEN_WIDTH,
-        (float)(SCREEN_HEIGHT - BOUNDARY_BOTTOM),
+    game->camera.target = (Vector2){
+        (float)SCREEN_WIDTH * (float)SCREEN_ZOOM,
+        (float)SCREEN_HEIGHT * (float)SCREEN_ZOOM,
     };
 
-    game->bases[0] = (Rectangle){
-        0.0f,
-        (float)(SCREEN_HEIGHT - BOUNDARY_BOTTOM),
-        (float)SCREEN_WIDTH,
-        (float)BOUNDARY_BOTTOM,
-    };
-    game->bases[1] = (Rectangle){
-        (float)SCREEN_WIDTH,
-        (float)(SCREEN_HEIGHT - BOUNDARY_BOTTOM),
-        (float)SCREEN_WIDTH,
-        (float)BOUNDARY_BOTTOM,
-    };
+    for (int i = 0; i < BACKGROUND_TEXTURE_COUNT; i++) {
+        game->backgrounds[i] = (Rectangle){
+            (float)i * (float)BOUNDARY_WIDTH,
+            0.0f,
+            (float)BOUNDARY_WIDTH,
+            (float)(BOUNDARY_HEIGHT - BOUNDARY_BOTTOM),
+        };
+    }
+    for (int i = 0; i < BASE_TEXTURE_COUNT; i++) {
+        game->bases[i] = (Rectangle){
+            (float)i * (float)BOUNDARY_WIDTH,
+            (float)(BOUNDARY_HEIGHT - BOUNDARY_BOTTOM),
+            (float)BOUNDARY_WIDTH,
+            (float)BOUNDARY_BOTTOM,
+        };
+    }
 
     game->obstacles[0] = (Obstacle){0};
-    game->obstacles[0].offset = GetNextOffset(OBSTACLE_FRAC / 2 + 1);
-    game->obstacles[0].distance = (float)SCREEN_WIDTH;
-    game->obstacles[1] = (Obstacle){0};
-    game->obstacles[1].offset = GetNextOffset(OBSTACLE_FRAC / 2 + 1);
-    game->obstacles[1].distance = (float)SCREEN_WIDTH + ((float)(SCREEN_WIDTH + OBSTACLE_WIDTH) / 2.0f);
+    game->obstacles[0].position.y = GetNextOffset(OBSTACLE_FRAC / 2 + 1);
+    game->obstacles[0].position.x = (float)BOUNDARY_WIDTH;
+    for (int i = 1; i < OBSTACLE_COUNT; i++) {
+        game->obstacles[i] = (Obstacle){0};
+        game->obstacles[i].position.y = GetNextOffset(OBSTACLE_FRAC / 2 + 1);
+        game->obstacles[i].position.x = game->obstacles[i - 1].position.x + OBSTACLE_WIDTH + OBSTACLE_DISTANCE;
+    }
 
     game->bird = (Bird){0};
-    game->bird.hitCircleCenter = (Vector2){(float)SCREEN_WIDTH / 2.0f, (float)SCREEN_HEIGHT / 2.0f};
+    game->bird.center = (Vector2){(float)BOUNDARY_WIDTH / 2.0f, (float)BOUNDARY_HEIGHT / 2.0f};
 
     game->score = BIRD_INITIAL_SCORE;
 }
@@ -514,7 +540,7 @@ void ScoreDraw(unsigned int score, Vector2 pos, Textures* textures) {
             textures->digit[base].width,
             textures->digit[base].height,
         },
-        (Rectangle){(SCREEN_WIDTH - (pos.x + size.x)), pos.y, size.x, size.y},
+        (Rectangle){(BOUNDARY_WIDTH - (pos.x + size.x)), pos.y, size.x, size.y},
         (Vector2){0.0f, 0.0f},
         0.0f,
         WHITE
@@ -536,7 +562,7 @@ void ScoreDraw(unsigned int score, Vector2 pos, Textures* textures) {
                 textures->digit[base].width,
                 textures->digit[base].height,
             },
-            (Rectangle){(SCREEN_WIDTH - (pos.x + (digit * (size.x + 0.5f)))), pos.y, size.x, size.y},
+            (Rectangle){(BOUNDARY_WIDTH - (pos.x + (digit * (size.x + 0.5f)))), pos.y, size.x, size.y},
             (Vector2){0.0f, 0.0f},
             0.0f,
             WHITE
@@ -560,8 +586,8 @@ void GameIntroDraw(Game* game) {
         (Rectangle){
             padding.x,
             BOUNDARY_TOP + padding.y + marginTop,
-            SCREEN_WIDTH - (2 * padding.x),
-            SCREEN_HEIGHT - (BOUNDARY_TOP + BOUNDARY_BOTTOM + (2 * padding.y)),
+            BOUNDARY_WIDTH - (2 * padding.x),
+            BOUNDARY_HEIGHT - (BOUNDARY_TOP + BOUNDARY_BOTTOM + (2 * padding.y)),
         },
         (Vector2){0.0f, 0.0f},
         0.0f,
@@ -582,10 +608,9 @@ void GameIntroUpdate(Game* game, float frameTime) {
 }
 
 void GamePlayDraw(Game* game) {
-    BackgroundDraw(game->backgrounds, 2, &game->textures);
-    ObstacleDraw(&game->obstacles[0], &game->textures);
-    ObstacleDraw(&game->obstacles[1], &game->textures);
-    BaseDraw(game->bases, 2, &game->textures);
+    BackgroundDraw(game->backgrounds, BACKGROUND_TEXTURE_COUNT, &game->textures);
+    ObstacleDraw(game->obstacles, OBSTACLE_COUNT, &game->textures);
+    BaseDraw(game->bases, BASE_TEXTURE_COUNT, &game->textures);
 
     BirdDraw(&game->bird, &game->textures);
 
@@ -593,15 +618,14 @@ void GamePlayDraw(Game* game) {
 }
 
 void GamePlayUpdate(Game* game, float frameTime) {
-    BackgroundUpdate(game->backgrounds, 2, frameTime);
-    BaseUpdate(game->bases, 2, frameTime);
+    BackgroundUpdate(game->backgrounds, BACKGROUND_TEXTURE_COUNT, frameTime);
+    BaseUpdate(game->bases, BASE_TEXTURE_COUNT, frameTime);
 
-    ObstacleUpdate(&game->obstacles[0], frameTime);
-    ObstacleUpdate(&game->obstacles[1], frameTime);
+    ObstacleUpdate(game->obstacles, OBSTACLE_COUNT, frameTime);
 
     BirdUpdate(&game->bird, IsInputReceived(&game->sounds), frameTime);
-    game->score += BirdIsPassed(&game->bird, game->obstacles, 2, &game->sounds);
-    if (BirdIsCollide(&game->bird, game->obstacles, 2, &game->sounds)) {
+    game->score += BirdIsPassed(&game->bird, game->obstacles, OBSTACLE_COUNT, &game->sounds);
+    if (BirdIsCollide(&game->bird, game->obstacles, OBSTACLE_COUNT, &game->sounds)) {
         game->flashIntensity = FLASH_INITIAL_ALPHA;
         game->mode = OVER;
     }
@@ -611,14 +635,14 @@ void GameOverDraw(Game* game) {
     GamePlayDraw(game);
 
 #if DRAW_TEXTURE
-    DrawRectangle(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT, Fade(WHITE, game->flashIntensity));
+    DrawRectangle(0.0f, 0.0f, BOUNDARY_WIDTH, BOUNDARY_HEIGHT, Fade(WHITE, game->flashIntensity));
 
     float marginTop = 120.0f;
     Vector2 size = (Vector2){300.0f, 70.0f};
     DrawTexturePro(
         game->textures.gameOver,
         (Rectangle){0.0f, 0.0f, game->textures.gameOver.width, game->textures.gameOver.height},
-        (Rectangle){(SCREEN_WIDTH / 2.0f) - (size.x / 2.0f), marginTop, size.x, size.y},
+        (Rectangle){(BOUNDARY_WIDTH / 2.0f) - (size.x / 2.0f), marginTop, size.x, size.y},
         (Vector2){0.0f, 0.0f},
         0.0f,
         WHITE
@@ -628,7 +652,7 @@ void GameOverDraw(Game* game) {
 
 void GameOverUpdate(Game* game, float frameTime) {
     if (game->flashIntensity >= 0.0f) {
-        game->flashIntensity -= FLASH_DECAY_SPEED * frameTime;
+        game->flashIntensity -= (float)FLASH_DECAY_SPEED * frameTime;
     } else {
         game->flashIntensity = 0.0f;
     }
