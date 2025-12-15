@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en-us">
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+
+        <title>Flappy Bird</title>
+
+        <link rel="icon" type="image/x-icon" href="./favicon.ico" />
+        <link rel="stylesheet" type="text/css" href="./index.css" />
+    </head>
+
+    <body>
+        <div class="canvas-container">
+            <canvas id="wasm-container" oncontextmenu="event.preventDefault()"></canvas>
+            <button id="wasm-repo">GitHub</button>
+            <button id="wasm-fullscreen">⛶</button>
+        </div>
+
+        <script defer type="text/javascript" src="./index.js"></script>
+        <script defer type="text/javascript" src="./flappy-bird.js"></script>
+    </body>
+</html>
